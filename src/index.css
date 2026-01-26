@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global styles for the desktop app shell */
+:root {
+  color-scheme: dark;
+}
+
+/* Ensure full-height app canvas */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
