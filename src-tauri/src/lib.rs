@@ -23,6 +23,22 @@ pub struct AnalysisResult {
   pub decision: String,
 }
 
+/* Export row structure for CSV output */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportRow {
+  pub id: String,
+  pub name: String,
+  pub generation: String,
+  pub location: String,
+  pub year: u16,
+  pub germination_rate: f32,
+  pub growth_score: u8,
+  pub disease_resistance: u8,
+  pub aroma_score: u8,
+  pub total_score: f32,
+  pub decision: String,
+}
+
 /* Custom deserializer for percent values like "85" or "85%" */
 fn deserialize_percent_f32<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
@@ -79,12 +95,30 @@ fn analyze_varieties(data: Vec<TeaVariety>) -> Result<Vec<AnalysisResult>, Strin
   Ok(results)
 }
 
+/* Save analysis rows to CSV file */
+#[tauri::command]
+fn save_analysis_csv(path: String, rows: Vec<ExportRow>) -> Result<(), String> {
+  let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+  let mut writer = csv::Writer::from_writer(file);
+
+  for row in rows {
+    writer.serialize(row).map_err(|e| e.to_string())?;
+  }
+
+  writer.flush().map_err(|e| e.to_string())?;
+  Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
-    .invoke_handler(tauri::generate_handler![load_csv, analyze_varieties])
+    .invoke_handler(tauri::generate_handler![
+      load_csv,
+      analyze_varieties,
+      save_analysis_csv
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

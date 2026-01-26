@@ -24,3 +24,6 @@ export type AnalysisResult = {
 /* Merged row for UI */
 export type Row = TeaVariety & AnalysisResult;
 
+/* Export row for CSV saving */
+export type ExportRow = Row;
+
