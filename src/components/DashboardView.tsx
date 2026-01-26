@@ -31,6 +31,7 @@ function formatScore(score: number): string {
 
 type Props = {
   rows: Row[];
+  totalCount?: number;
   selectedId: string;
   onSelectId: (id: string) => void;
 };
@@ -38,6 +39,7 @@ type Props = {
 /* Minimal dashboard: table + selected card */
 export function DashboardView({
   rows,
+  totalCount,
   selectedId,
   onSelectId,
 }: Props): ReactElement {
@@ -49,7 +51,15 @@ export function DashboardView({
         <div className="rounded-xl bg-slate-900/60 p-3 shadow-sm ring-1 ring-slate-800">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-200">品種一覧</h2>
-            <div className="text-xs text-slate-400">{rows.length} 件</div>
+            <div className="text-xs text-slate-400">
+              {rows.length} 件
+              {typeof totalCount === "number" ? (
+                <>
+                  {" "}
+                  / <span className="text-slate-300">{totalCount}</span> 件
+                </>
+              ) : null}
+            </div>
           </div>
 
           <div className="max-h-[520px] overflow-auto rounded-lg ring-1 ring-slate-800">
