@@ -7,8 +7,7 @@ import {
   Tooltip,
 } from "recharts";
 
-import type { Decision, Row } from "../types";
-import { computeSummary } from "../utils/summary";
+import type { Decision, Summary } from "../types";
 
 /* Format a number for display */
 function fmt(n: number): string {
@@ -28,7 +27,7 @@ function decisionLabel(decision: Decision): string {
 }
 
 type Props = {
-  rows: Row[];
+  summary: Summary;
   totalCount: number;
   activeDecision?: Decision | "all";
   onDecisionClick?: (decision: Decision) => void;
@@ -36,12 +35,11 @@ type Props = {
 
 /* Summary panel: decision distribution + quick stats */
 export function SummaryPanel({
-  rows,
+  summary,
   totalCount,
   activeDecision,
   onDecisionClick,
 }: Props): ReactElement {
-  const summary = computeSummary(rows, 3);
   const ratio = (n: number): string => {
     if (!summary.total) return "0%";
     return `${Math.round((n / summary.total) * 100)}%`;
@@ -67,7 +65,7 @@ export function SummaryPanel({
 
             <div className="text-right">
               <div className="text-xs text-slate-400">平均スコア</div>
-              <div className="text-2xl font-semibold">{fmt(summary.avgScore)}</div>
+                <div className="text-2xl font-semibold">{fmt(summary.avgScore)}</div>
             </div>
           </div>
 
