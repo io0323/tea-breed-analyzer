@@ -10,6 +10,10 @@ import type {
   Decision,
   ExportRow,
   Row,
+  SortDir,
+  SortKey,
+  ViewModel,
+  ViewParams,
 } from "./types";
 
 type View = "dashboard" | "graphs";
@@ -51,11 +55,22 @@ export default function App() {
   const [yearFrom, setYearFrom] = useState<string>("");
   const [yearTo, setYearTo] = useState<string>("");
 
-  type SortKey = "total_score" | "year" | "name" | "generation" | "decision" | "id";
-  type SortDir = "asc" | "desc";
-
   const [sortKey, setSortKey] = useState<SortKey>("total_score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const [viewModel, setViewModel] = useState<ViewModel>({
+    generations: [],
+    filteredRows: [],
+    summary: {
+      total: 0,
+      counts: { keep: 0, review: 0, discard: 0 },
+      avgScore: 0,
+      top: [],
+      bottom: [],
+    },
+    generationAverages: [],
+    yearlyTrend: [],
+  });
 
   /* Load a CSV file path and run analysis */
   async function loadAndAnalyze(path: string): Promise<void> {
@@ -135,71 +150,78 @@ export default function App() {
     };
   }, []);
 
-  /* Collect unique generation values */
-  const generations = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows) set.add(r.generation);
-    return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
+  /* Compute filters/sort/summary/charts in Rust (view model) */
+  useEffect(() => {
+    let cancelled = false;
 
-  /* Apply filters to rows */
-  const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const from = yearFrom.trim() ? Number(yearFrom) : null;
-    const to = yearTo.trim() ? Number(yearTo) : null;
-    const hasFrom = from !== null && Number.isFinite(from);
-    const hasTo = to !== null && Number.isFinite(to);
+    const run = async (): Promise<void> => {
+      if (rows.length === 0) {
+        setViewModel((cur) => ({
+          ...cur,
+          generations: [],
+          filteredRows: [],
+          summary: {
+            total: 0,
+            counts: { keep: 0, review: 0, discard: 0 },
+            avgScore: 0,
+            top: [],
+            bottom: [],
+          },
+          generationAverages: [],
+          yearlyTrend: [],
+        }));
+        return;
+      }
 
-    return rows.filter((r) => {
-      if (decisionFilter !== "all" && r.decision !== decisionFilter) {
-        return false;
-      }
-      if (generationFilter !== "all" && r.generation !== generationFilter) {
-        return false;
-      }
-      if (hasFrom && r.year < (from as number)) {
-        return false;
-      }
-      if (hasTo && r.year > (to as number)) {
-        return false;
-      }
-      if (q) {
-        const hay = `${r.id} ${r.name} ${r.location} ${r.generation}`
-          .toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [rows, query, decisionFilter, generationFilter, yearFrom, yearTo]);
+      const fromRaw = yearFrom.trim() ? Number(yearFrom) : null;
+      const toRaw = yearTo.trim() ? Number(yearTo) : null;
+      const yearFromNum = fromRaw !== null && Number.isFinite(fromRaw)
+        ? Math.trunc(fromRaw)
+        : null;
+      const yearToNum = toRaw !== null && Number.isFinite(toRaw)
+        ? Math.trunc(toRaw)
+        : null;
 
-  /* Sort rows for table/export (independent from chart order) */
-  const displayRows = useMemo(() => {
-    const decisionOrder: Record<Decision, number> = {
-      keep: 0,
-      review: 1,
-      discard: 2,
+      const params: ViewParams = {
+        query,
+        decision: decisionFilter === "all" ? null : decisionFilter,
+        generation: generationFilter === "all" ? null : generationFilter,
+        yearFrom: yearFromNum,
+        yearTo: yearToNum,
+        sortKey,
+        sortDir,
+        topN: 3,
+      };
+
+      try {
+        const next = await invoke<ViewModel>("compute_view_model", { rows, params });
+        if (cancelled) return;
+        setViewModel(next);
+      } catch (e) {
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+      }
     };
 
-    const sorted = [...filteredRows].sort((a, b) => {
-      let cmp = 0;
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    rows,
+    query,
+    decisionFilter,
+    generationFilter,
+    yearFrom,
+    yearTo,
+    sortKey,
+    sortDir,
+  ]);
 
-      if (sortKey === "total_score") cmp = a.total_score - b.total_score;
-      else if (sortKey === "year") cmp = a.year - b.year;
-      else if (sortKey === "name") cmp = a.name.localeCompare(b.name);
-      else if (sortKey === "generation") cmp = a.generation.localeCompare(b.generation);
-      else if (sortKey === "decision") cmp = decisionOrder[a.decision] - decisionOrder[b.decision];
-      else if (sortKey === "id") cmp = a.id.localeCompare(b.id);
-
-      if (cmp === 0) {
-        /* Stable tie-breaker */
-        cmp = a.id.localeCompare(b.id);
-      }
-
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-
-    return sorted;
-  }, [filteredRows, sortKey, sortDir]);
+  const generations = viewModel.generations;
+  const displayRows = viewModel.filteredRows;
+  const filteredCount = viewModel.summary.total;
 
   /* Ensure selection exists in filtered list */
   const effectiveSelectedId = useMemo(() => {
@@ -404,7 +426,7 @@ export default function App() {
               <div className="flex items-center gap-3">
                 <div className="text-xs text-slate-400">
                   フィルタ後:{" "}
-                  <span className="text-slate-200">{filteredRows.length}</span>{" "}
+                  <span className="text-slate-200">{filteredCount}</span>{" "}
                   / {rows.length} 件
                 </div>
                 <button
@@ -427,7 +449,7 @@ export default function App() {
         </div>
 
         <SummaryPanel
-          rows={filteredRows}
+          summary={viewModel.summary}
           totalCount={rows.length}
           activeDecision={decisionFilter}
           onDecisionClick={(d) => {
@@ -454,7 +476,11 @@ export default function App() {
             }}
           />
         ) : (
-          <GraphView rows={filteredRows} />
+          <GraphView
+            generationAverages={viewModel.generationAverages}
+            yearlyTrend={viewModel.yearlyTrend}
+            total={viewModel.summary.total}
+          />
         )}
       </div>
     </div>

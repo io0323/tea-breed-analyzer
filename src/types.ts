@@ -27,3 +27,66 @@ export type Row = TeaVariety & AnalysisResult;
 /* Export row for CSV saving */
 export type ExportRow = Row;
 
+/* Sort key and direction (aligned with Rust SortKey/SortDir) */
+export type SortKey =
+  | "total_score"
+  | "year"
+  | "name"
+  | "generation"
+  | "decision"
+  | "id";
+
+export type SortDir = "asc" | "desc";
+
+/* Summary view model (aligned with Rust) */
+export type SummaryCounts = {
+  keep: number;
+  review: number;
+  discard: number;
+};
+
+export type SummaryRow = {
+  id: string;
+  name: string;
+  total_score: number;
+};
+
+export type Summary = {
+  total: number;
+  counts: SummaryCounts;
+  avgScore: number;
+  top: SummaryRow[];
+  bottom: SummaryRow[];
+};
+
+export type GenerationAvg = {
+  generation: string;
+  avgScore: number;
+  count: number;
+};
+
+export type YearAvg = {
+  year: number;
+  avgScore: number;
+  count: number;
+};
+
+export type ViewParams = {
+  query: string;
+  decision: Decision | null;
+  generation: string | null;
+  yearFrom: number | null;
+  yearTo: number | null;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  topN: number;
+};
+
+export type ViewModel = {
+  generations: string[];
+  filteredRows: Row[];
+  summary: Summary;
+  generationAverages: GenerationAvg[];
+  yearlyTrend: YearAvg[];
+};
+

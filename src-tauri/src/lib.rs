@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 /* Decision categories for selection outcomes */
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +75,284 @@ pub struct ExportRow {
   pub aroma_score: u8,
   pub total_score: f32,
   pub decision: Decision,
+}
+
+/* Sort key for table/export ordering */
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortKey {
+  TotalScore,
+  Year,
+  Name,
+  Generation,
+  Decision,
+  Id,
+}
+
+/* Sort direction */
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortDir {
+  Asc,
+  Desc,
+}
+
+/* Request parameters for building the UI view model */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewParams {
+  pub query: String,
+  pub decision: Option<Decision>,
+  pub generation: Option<String>,
+  pub year_from: Option<u16>,
+  pub year_to: Option<u16>,
+  pub sort_key: SortKey,
+  pub sort_dir: SortDir,
+  pub top_n: usize,
+}
+
+/* Summary counts by decision */
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SummaryCounts {
+  pub keep: u32,
+  pub review: u32,
+  pub discard: u32,
+}
+
+/* Summary row used in top/bottom lists */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryRow {
+  pub id: String,
+  pub name: String,
+  pub total_score: f32,
+}
+
+/* Summary data returned to the UI */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+  pub total: usize,
+  pub counts: SummaryCounts,
+  pub avg_score: f32,
+  pub top: Vec<SummaryRow>,
+  pub bottom: Vec<SummaryRow>,
+}
+
+/* Generation average for charts */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationAvg {
+  pub generation: String,
+  pub avg_score: f32,
+  pub count: u32,
+}
+
+/* Yearly average for charts */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YearAvg {
+  pub year: u16,
+  pub avg_score: f32,
+  pub count: u32,
+}
+
+/* View model returned to the UI */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewModel {
+  pub generations: Vec<String>,
+  pub filtered_rows: Vec<ExportRow>,
+  pub summary: Summary,
+  pub generation_averages: Vec<GenerationAvg>,
+  pub yearly_trend: Vec<YearAvg>,
+}
+
+/* Map decision to a stable rank for sorting */
+fn decision_rank(decision: Decision) -> u8 {
+  match decision {
+    Decision::Keep => 0,
+    Decision::Review => 1,
+    Decision::Discard => 2,
+  }
+}
+
+/* Compute unique generations (for filter dropdown) */
+fn compute_generations(rows: &[ExportRow]) -> Vec<String> {
+  let mut set: HashSet<String> = HashSet::new();
+  for r in rows {
+    set.insert(r.generation.clone());
+  }
+  let mut out = set.into_iter().collect::<Vec<_>>();
+  out.sort_by(|a, b| a.cmp(b));
+  out
+}
+
+/* Filter rows based on view params */
+fn filter_rows(rows: &[ExportRow], params: &ViewParams) -> Vec<ExportRow> {
+  let q = params.query.trim().to_lowercase();
+
+  rows
+    .iter()
+    .filter(|r| {
+      if let Some(d) = params.decision {
+        if r.decision != d {
+          return false;
+        }
+      }
+      if let Some(gen) = params.generation.as_ref() {
+        if r.generation != *gen {
+          return false;
+        }
+      }
+      if let Some(from) = params.year_from {
+        if r.year < from {
+          return false;
+        }
+      }
+      if let Some(to) = params.year_to {
+        if r.year > to {
+          return false;
+        }
+      }
+      if !q.is_empty() {
+        let hay = format!("{} {} {} {}", r.id, r.name, r.location, r.generation)
+          .to_lowercase();
+        if !hay.contains(&q) {
+          return false;
+        }
+      }
+      true
+    })
+    .cloned()
+    .collect::<Vec<_>>()
+}
+
+/* Sort rows for display/export */
+fn sort_rows(rows: &mut [ExportRow], sort_key: SortKey, sort_dir: SortDir) {
+  rows.sort_by(|a, b| {
+    let cmp = match sort_key {
+      SortKey::TotalScore => a.total_score.total_cmp(&b.total_score),
+      SortKey::Year => a.year.cmp(&b.year),
+      SortKey::Name => a.name.cmp(&b.name),
+      SortKey::Generation => a.generation.cmp(&b.generation),
+      SortKey::Decision => decision_rank(a.decision).cmp(&decision_rank(b.decision)),
+      SortKey::Id => a.id.cmp(&b.id),
+    };
+
+    let cmp = if cmp == std::cmp::Ordering::Equal {
+      a.id.cmp(&b.id)
+    } else {
+      cmp
+    };
+
+    match sort_dir {
+      SortDir::Asc => cmp,
+      SortDir::Desc => cmp.reverse(),
+    }
+  });
+}
+
+/* Build summary (counts/avg/top/bottom) from already-filtered rows */
+fn compute_summary(rows: &[ExportRow], top_n: usize) -> Summary {
+  let mut counts = SummaryCounts {
+    keep: 0,
+    review: 0,
+    discard: 0,
+  };
+  let mut sum: f32 = 0.0;
+
+  for r in rows {
+    match r.decision {
+      Decision::Keep => counts.keep += 1,
+      Decision::Review => counts.review += 1,
+      Decision::Discard => counts.discard += 1,
+    }
+    sum += r.total_score;
+  }
+
+  let avg_score = if rows.is_empty() {
+    0.0
+  } else {
+    sum / (rows.len() as f32)
+  };
+
+  let n = if top_n == 0 { 3 } else { top_n };
+  let mut by_score = rows.to_vec();
+  by_score.sort_by(|a, b| b.total_score.total_cmp(&a.total_score));
+
+  let top = by_score
+    .iter()
+    .take(n)
+    .map(|r| SummaryRow {
+      id: r.id.clone(),
+      name: r.name.clone(),
+      total_score: r.total_score,
+    })
+    .collect::<Vec<_>>();
+
+  let mut bottom = by_score
+    .iter()
+    .rev()
+    .take(n)
+    .map(|r| SummaryRow {
+      id: r.id.clone(),
+      name: r.name.clone(),
+      total_score: r.total_score,
+    })
+    .collect::<Vec<_>>();
+  bottom.reverse();
+
+  Summary {
+    total: rows.len(),
+    counts,
+    avg_score,
+    top,
+    bottom,
+  }
+}
+
+/* Compute generation average scores from filtered rows */
+fn compute_generation_averages(rows: &[ExportRow]) -> Vec<GenerationAvg> {
+  let mut acc: HashMap<String, (f32, u32)> = HashMap::new();
+
+  for r in rows {
+    let entry = acc.entry(r.generation.clone()).or_insert((0.0, 0));
+    entry.0 += r.total_score;
+    entry.1 += 1;
+  }
+
+  let mut out = acc
+    .into_iter()
+    .map(|(generation, (sum, count))| GenerationAvg {
+      generation,
+      avg_score: if count == 0 { 0.0 } else { sum / (count as f32) },
+      count,
+    })
+    .collect::<Vec<_>>();
+  out.sort_by(|a, b| a.generation.cmp(&b.generation));
+  out
+}
+
+/* Compute yearly trend (average total_score by year) from filtered rows */
+fn compute_yearly_trend(rows: &[ExportRow]) -> Vec<YearAvg> {
+  let mut acc: HashMap<u16, (f32, u32)> = HashMap::new();
+
+  for r in rows {
+    let entry = acc.entry(r.year).or_insert((0.0, 0));
+    entry.0 += r.total_score;
+    entry.1 += 1;
+  }
+
+  let mut out = acc
+    .into_iter()
+    .map(|(year, (sum, count))| YearAvg {
+      year,
+      avg_score: if count == 0 { 0.0 } else { sum / (count as f32) },
+      count,
+    })
+    .collect::<Vec<_>>();
+  out.sort_by(|a, b| a.year.cmp(&b.year));
+  out
 }
 
 /* Validate TeaVariety domain constraints */
@@ -421,6 +700,27 @@ fn analyze_varieties(data: Vec<TeaVariety>) -> Result<Vec<AnalysisResult>, Strin
   Ok(results)
 }
 
+/* Build UI view model (filter/sort/summary/charts) in Rust */
+#[tauri::command]
+fn compute_view_model(rows: Vec<ExportRow>, params: ViewParams) -> Result<ViewModel, String> {
+  let generations = compute_generations(&rows);
+  let mut filtered = filter_rows(&rows, &params);
+
+  sort_rows(&mut filtered, params.sort_key, params.sort_dir);
+
+  let summary = compute_summary(&filtered, params.top_n);
+  let generation_averages = compute_generation_averages(&filtered);
+  let yearly_trend = compute_yearly_trend(&filtered);
+
+  Ok(ViewModel {
+    generations,
+    filtered_rows: filtered,
+    summary,
+    generation_averages,
+    yearly_trend,
+  })
+}
+
 /* Save analysis rows to CSV file */
 #[tauri::command]
 fn save_analysis_csv(path: String, rows: Vec<ExportRow>) -> Result<(), String> {
@@ -638,6 +938,7 @@ pub fn run() {
       load_csv,
       load_and_analyze_csv,
       analyze_varieties,
+      compute_view_model,
       save_analysis_csv
     ])
     .run(tauri::generate_context!())
