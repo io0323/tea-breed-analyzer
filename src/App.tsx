@@ -5,21 +5,14 @@ import { listen } from "@tauri-apps/api/event";
 
 import { DashboardView } from "./components/DashboardView";
 import { GraphView } from "./components/GraphView";
-import { AnalysisConfigModal } from "./components/AnalysisConfigModal";
 import { SummaryPanel } from "./components/SummaryPanel";
 import type {
-  AnalysisConfig,
   AnalysisResult,
   Decision,
   ExportRow,
   Row,
   TeaVariety,
 } from "./types";
-import {
-  defaultAnalysisConfig,
-  loadAnalysisConfig,
-  saveAnalysisConfig,
-} from "./utils/analysisConfig";
 
 type View = "dashboard" | "graphs";
 
@@ -46,7 +39,6 @@ function decisionChipClass(isActive: boolean): string {
 /** TeaBreed Analyzer minimal dashboard */
 export default function App() {
   const [csvPath, setCsvPath] = useState<string>("");
-  const [varieties, setVarieties] = useState<TeaVariety[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -90,7 +82,6 @@ export default function App() {
         .filter((v): v is Row => v !== null)
         .sort((a, b) => b.total_score - a.total_score);
 
-      setVarieties(data);
       setRows(merged);
       setSelectedId(merged[0]?.id ?? "");
     } catch (e) {
@@ -262,13 +253,6 @@ export default function App() {
     }
   }
 
-  /* Apply current config and re-run analysis */
-  async function applyConfigAndReanalyze(): Promise<void> {
-    setIsConfigOpen(false);
-    if (varieties.length === 0) return;
-    await runAnalysis(varieties, config);
-  }
-
   return (
     <div className="min-h-full bg-slate-950 text-slate-100">
       {isFileDropHover ? (
@@ -314,17 +298,6 @@ export default function App() {
                 グラフ
               </button>
             </nav>
-
-            <button
-              type="button"
-              onClick={() => setIsConfigOpen(true)}
-              className="rounded-lg bg-slate-900/60 px-4 py-2 text-sm font-medium
-                text-slate-200 shadow-sm ring-1 ring-slate-800
-                hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={isLoading}
-            >
-              解析設定
-            </button>
 
             <button
               type="button"
@@ -445,16 +418,40 @@ export default function App() {
             </div>
 
             <div className="col-span-8 flex items-end justify-end">
-              <div className="text-xs text-slate-400">
-                フィルタ後:{" "}
-                <span className="text-slate-200">{filteredRows.length}</span>{" "}
-                / {rows.length} 件
+              <div className="flex items-center gap-3">
+                <div className="text-xs text-slate-400">
+                  フィルタ後:{" "}
+                  <span className="text-slate-200">{filteredRows.length}</span>{" "}
+                  / {rows.length} 件
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setDecisionFilter("all");
+                    setGenerationFilter("all");
+                    setYearFrom("");
+                    setYearTo("");
+                  }}
+                  className="rounded-lg bg-slate-950/40 px-3 py-2 text-xs
+                    text-slate-200 ring-1 ring-slate-800 hover:bg-slate-900/60"
+                >
+                  フィルタをリセット
+                </button>
               </div>
             </div>
           </div>
         </div>
 
-        <SummaryPanel rows={filteredRows} totalCount={rows.length} />
+        <SummaryPanel
+          rows={filteredRows}
+          totalCount={rows.length}
+          activeDecision={decisionFilter}
+          onDecisionClick={(d) => {
+            setView("dashboard");
+            setDecisionFilter(decisionFilter === d ? "all" : d);
+          }}
+        />
 
         {view === "dashboard" ? (
           <DashboardView

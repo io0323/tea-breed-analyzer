@@ -30,10 +30,17 @@ function decisionLabel(decision: Decision): string {
 type Props = {
   rows: Row[];
   totalCount: number;
+  activeDecision?: Decision | "all";
+  onDecisionClick?: (decision: Decision) => void;
 };
 
 /* Summary panel: decision distribution + quick stats */
-export function SummaryPanel({ rows, totalCount }: Props): ReactElement {
+export function SummaryPanel({
+  rows,
+  totalCount,
+  activeDecision,
+  onDecisionClick,
+}: Props): ReactElement {
   const summary = computeSummary(rows, 3);
   const ratio = (n: number): string => {
     if (!summary.total) return "0%";
@@ -66,9 +73,17 @@ export function SummaryPanel({ rows, totalCount }: Props): ReactElement {
 
           <div className="mt-4 grid grid-cols-3 gap-3">
             {(["keep", "review", "discard"] as const).map((d) => (
-              <div
+              <button
                 key={d}
-                className="rounded-xl bg-slate-950/60 p-3 ring-1 ring-slate-800"
+                type="button"
+                onClick={() => onDecisionClick?.(d)}
+                className={
+                  "rounded-xl bg-slate-950/60 p-3 text-left ring-1 ring-slate-800 " +
+                  "hover:bg-slate-900/60 " +
+                  (activeDecision === d
+                    ? "ring-2 ring-sky-500/30"
+                    : "")
+                }
               >
                 <div className="text-xs text-slate-400">{decisionLabel(d)}</div>
                 <div className="mt-1 flex items-baseline gap-2">
@@ -79,7 +94,7 @@ export function SummaryPanel({ rows, totalCount }: Props): ReactElement {
                     {ratio(summary.counts[d])}
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
 
@@ -156,6 +171,11 @@ export function SummaryPanel({ rows, totalCount }: Props): ReactElement {
                   innerRadius={55}
                   outerRadius={85}
                   paddingAngle={2}
+                  onClick={(data) => {
+                    const d = (data as { decision?: Decision }).decision;
+                    if (!d) return;
+                    onDecisionClick?.(d);
+                  }}
                 >
                   {pieData.map((d) => (
                     <Cell

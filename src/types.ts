@@ -21,21 +21,6 @@ export type AnalysisResult = {
   decision: Decision;
 };
 
-/* Analysis config for scoring */
-export type AnalysisWeights = {
-  germination: number;
-  growth: number;
-  disease: number;
-  aroma: number;
-};
-
-export type AnalysisConfig = {
-  weights: AnalysisWeights;
-  keep_threshold: number;
-  review_threshold: number;
-  normalize_to_100: boolean;
-};
-
 /* Merged row for UI */
 export type Row = TeaVariety & AnalysisResult;
 
