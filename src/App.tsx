@@ -16,6 +16,8 @@ import type {
   ViewModel,
   ViewParams,
 } from "./types";
+import { ValidationModal } from "./components/ValidationModal";
+import type { CsvValidationReport } from "./types";
 
 type View = "dashboard" | "graphs";
 
@@ -49,6 +51,8 @@ export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [toast, setToast] = useState<string>("");
   const [isFileDropHover, setIsFileDropHover] = useState<boolean>(false);
+  const [isValidationOpen, setIsValidationOpen] = useState<boolean>(false);
+  const [validationReport, setValidationReport] = useState<CsvValidationReport | null>(null);
 
   const [query, setQuery] = useState<string>("");
   const [decisionFilter, setDecisionFilter] = useState<Decision | "all">("all");
@@ -398,6 +402,7 @@ export default function App() {
   }
 
   return (
+    <>
     <div className="min-h-full bg-slate-950 text-slate-100">
       {isFileDropHover ? (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm">
@@ -452,6 +457,34 @@ export default function App() {
               disabled={isLoading}
             >
               {isLoading ? "読み込み中..." : "CSV を選択"}
+            </button>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setError("");
+                setIsLoading(true);
+                try {
+                  if (!csvPath) {
+                    setToast("先に CSV を選択するか、ファイルパスを入力してください");
+                    return;
+                  }
+                  const rep = await invoke<CsvValidationReport>("validate_csv", { path: csvPath });
+                  setValidationReport(rep);
+                  setIsValidationOpen(true);
+                } catch (e) {
+                  const message = e instanceof Error ? e.message : String(e);
+                  setError(message);
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium
+                shadow-sm ring-1 ring-slate-700 hover:bg-slate-750
+                disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isLoading || !csvPath}
+            >
+              CSV 検証
             </button>
 
             <button
@@ -645,5 +678,11 @@ export default function App() {
         )}
       </div>
     </div>
+    <ValidationModal
+      open={isValidationOpen}
+      onClose={() => setIsValidationOpen(false)}
+      report={validationReport}
+    />
+    </>
   );
 }

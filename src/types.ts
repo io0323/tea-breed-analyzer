@@ -97,3 +97,19 @@ export type AppState = {
   selectedId: string;
 };
 
+/* CSV validation report types from Rust */
+export type CsvIssue = {
+  row: number;
+  line: number;
+  id: string | null;
+  message: string;
+};
+
+export type CsvValidationReport = {
+  path: string;
+  totalRows: number;
+  okRows: number;
+  errorRows: number;
+  issues: CsvIssue[];
+};
+
