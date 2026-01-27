@@ -4,6 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { DashboardView } from "./components/DashboardView";
 import { GraphView } from "./components/GraphView";
+import { SummaryPanel } from "./components/SummaryPanel";
 import type {
   AnalysisResult,
   Decision,
@@ -323,6 +324,8 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        <SummaryPanel rows={filteredRows} totalCount={rows.length} />
 
         {view === "dashboard" ? (
           <DashboardView
