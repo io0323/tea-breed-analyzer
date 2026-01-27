@@ -664,16 +664,72 @@ fn load_csv_file(path: &str) -> Result<Vec<TeaVariety>, String> {
   Ok(out)
 }
 
+/* Load tea varieties from a JSON file path (internal helper) */
+fn load_json_file(path: &str) -> Result<Vec<TeaVariety>, String> {
+  let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+  let data = serde_json::from_slice::<Vec<TeaVariety>>(&bytes)
+    .map_err(|e| format!("JSON読み込みエラー\npath: {}\n原因: {}", path, e))?;
+
+  for (idx, v) in data.iter().enumerate() {
+    validate_variety(v).map_err(|e| {
+      format!(
+        "JSON検証エラー\npath: {}\nindex: {}\nid: {}\n原因: {}",
+        path,
+        idx,
+        v.id,
+        e
+      )
+    })?;
+  }
+
+  Ok(data)
+}
+
 /* Load tea varieties from a CSV file path */
 #[tauri::command]
 fn load_csv(path: String) -> Result<Vec<TeaVariety>, String> {
   load_csv_file(&path)
 }
 
+/* Load tea varieties from a JSON file path */
+#[tauri::command]
+fn load_json(path: String) -> Result<Vec<TeaVariety>, String> {
+  load_json_file(&path)
+}
+
 /* Load a CSV and return analyzed rows (merged for UI/export) */
 #[tauri::command]
 fn load_and_analyze_csv(path: String) -> Result<Vec<ExportRow>, String> {
   let data = load_csv_file(&path)?;
+
+  let mut out = data
+    .into_iter()
+    .map(|v| {
+      let a = analyze_one(&v);
+      ExportRow {
+        id: v.id,
+        name: v.name,
+        generation: v.generation,
+        location: v.location,
+        year: v.year,
+        germination_rate: v.germination_rate,
+        growth_score: v.growth_score,
+        disease_resistance: v.disease_resistance,
+        aroma_score: v.aroma_score,
+        total_score: a.total_score,
+        decision: a.decision,
+      }
+    })
+    .collect::<Vec<_>>();
+
+  out.sort_by(|a, b| b.total_score.total_cmp(&a.total_score));
+  Ok(out)
+}
+
+/* Load a JSON and return analyzed rows (merged for UI/export) */
+#[tauri::command]
+fn load_and_analyze_json(path: String) -> Result<Vec<ExportRow>, String> {
+  let data = load_json_file(&path)?;
 
   let mut out = data
     .into_iter()
@@ -725,6 +781,76 @@ fn compute_view_model(rows: Vec<ExportRow>, params: ViewParams) -> Result<ViewMo
     generation_averages,
     yearly_trend,
   })
+}
+
+/* Structured issue for CSV validation */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvIssue {
+  pub row: usize,
+  pub line: usize,
+  pub id: Option<String>,
+  pub message: String,
+}
+
+/* CSV validation report (collects issues without failing fast) */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvValidationReport {
+  pub path: String,
+  pub total_rows: usize,
+  pub ok_rows: usize,
+  pub error_rows: usize,
+  pub issues: Vec<CsvIssue>,
+}
+
+/* Validate CSV and return a structured report */
+#[tauri::command]
+fn validate_csv(path: String) -> Result<CsvValidationReport, String> {
+  let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+  let mut reader = csv::Reader::from_reader(file);
+
+  let mut report = CsvValidationReport {
+    path: path.clone(),
+    total_rows: 0,
+    ok_rows: 0,
+    error_rows: 0,
+    issues: Vec::new(),
+  };
+
+  for (idx, row) in reader.deserialize::<TeaVariety>().enumerate() {
+    let row_num = idx + 1;
+    let line_num = idx + 2;
+    report.total_rows += 1;
+
+    match row {
+      Ok(variety) => match validate_variety(&variety) {
+        Ok(()) => {
+          report.ok_rows += 1;
+        }
+        Err(msg) => {
+          report.error_rows += 1;
+          report.issues.push(CsvIssue {
+            row: row_num,
+            line: line_num,
+            id: Some(variety.id),
+            message: msg,
+          });
+        }
+      },
+      Err(e) => {
+        report.error_rows += 1;
+        report.issues.push(CsvIssue {
+          row: row_num,
+          line: line_num,
+          id: None,
+          message: e.to_string(),
+        });
+      }
+    }
+  }
+
+  Ok(report)
 }
 
 /* Save analysis rows to CSV file */
@@ -1112,6 +1238,81 @@ mod tests {
     assert!((vm.yearly_trend[1].avg_score - 40.0).abs() < 1e-6);
     assert_eq!(vm.yearly_trend[1].count, 1);
   }
+
+  /* load_json should parse and validate JSON arrays */
+  #[test]
+  fn load_json_parses_rows() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let json_data = r#"
+      [
+        {
+          "id": "TV-001",
+          "name": "Yabukita",
+          "generation": "F1",
+          "location": "Shizuoka",
+          "year": 2024,
+          "germination_rate": "92%",
+          "growth_score": "4",
+          "disease_resistance": "4",
+          "aroma_score": "3"
+        }
+      ]
+    "#;
+
+    let mut path = std::env::temp_dir();
+    let suffix = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap()
+      .as_nanos();
+    path.push(format!(
+      "tea_breed_analyzer_load_json_{}_{}.json",
+      std::process::id(),
+      suffix
+    ));
+
+    std::fs::write(&path, json_data).unwrap();
+    let rows = super::load_json(path.to_string_lossy().to_string()).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "TV-001");
+    assert_eq!(rows[0].germination_rate, 92.0);
+  }
+
+  /* validate_csv should collect issues instead of failing fast */
+  #[test]
+  fn validate_csv_collects_issues() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let csv_data = concat!(
+      "id,name,generation,location,year,germination_rate,",
+      "growth_score,disease_resistance,aroma_score\n",
+      "TV-001,Yabukita,F1,Shizuoka,2024,92%,4,4,3\n",
+      "TV-002,Bad,F1,Shizuoka,2024,200%,4,4,3\n"
+    );
+
+    let mut path = std::env::temp_dir();
+    let suffix = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap()
+      .as_nanos();
+    path.push(format!(
+      "tea_breed_analyzer_validate_csv_{}_{}.csv",
+      std::process::id(),
+      suffix
+    ));
+
+    std::fs::write(&path, csv_data).unwrap();
+    let report = super::validate_csv(path.to_string_lossy().to_string()).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(report.total_rows, 2);
+    assert_eq!(report.ok_rows, 1);
+    assert_eq!(report.error_rows, 1);
+    assert_eq!(report.issues.len(), 1);
+    assert_eq!(report.issues[0].id.as_deref(), Some("TV-002"));
+  }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1121,9 +1322,12 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .invoke_handler(tauri::generate_handler![
       load_csv,
+      load_json,
       load_and_analyze_csv,
+      load_and_analyze_json,
       analyze_varieties,
       compute_view_model,
+      validate_csv,
       load_app_state,
       save_app_state,
       save_analysis_json,
