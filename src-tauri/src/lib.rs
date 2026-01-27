@@ -68,15 +68,43 @@ fn validate_config(config: &AnalysisConfig) -> Result<(), String> {
 /* Tea variety data model for CSV/JSON interop */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeaVariety {
+  #[serde(deserialize_with = "deserialize_trim_string", alias = "ID")]
   pub id: String,
+  #[serde(deserialize_with = "deserialize_trim_string", alias = "Name")]
   pub name: String,
+  #[serde(deserialize_with = "deserialize_trim_string", alias = "Generation")]
   pub generation: String,
+  #[serde(deserialize_with = "deserialize_trim_string", alias = "Location")]
   pub location: String,
+  #[serde(deserialize_with = "deserialize_u16", alias = "Year")]
   pub year: u16,
-  #[serde(deserialize_with = "deserialize_percent_f32")]
+  #[serde(
+    deserialize_with = "deserialize_percent_f32",
+    alias = "germinationRate",
+    alias = "germination",
+    alias = "GerminationRate"
+  )]
   pub germination_rate: f32,
+  #[serde(
+    deserialize_with = "deserialize_u8",
+    alias = "growthScore",
+    alias = "growth",
+    alias = "GrowthScore"
+  )]
   pub growth_score: u8,
+  #[serde(
+    deserialize_with = "deserialize_u8",
+    alias = "diseaseResistance",
+    alias = "disease",
+    alias = "DiseaseResistance"
+  )]
   pub disease_resistance: u8,
+  #[serde(
+    deserialize_with = "deserialize_u8",
+    alias = "aromaScore",
+    alias = "aroma",
+    alias = "AromaScore"
+  )]
   pub aroma_score: u8,
 }
 
@@ -121,16 +149,224 @@ fn validate_variety(variety: &TeaVariety) -> Result<(), String> {
   Ok(())
 }
 
+/* Custom deserializer for trimmed strings */
+fn deserialize_trim_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+  D: serde::Deserializer<'de>,
+{
+  struct TrimStringVisitor;
+
+  impl<'de> serde::de::Visitor<'de> for TrimStringVisitor {
+    type Value = String;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+      formatter.write_str("a string")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      Ok(v.trim().to_string())
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      Ok(v.trim().to_string())
+    }
+  }
+
+  deserializer.deserialize_any(TrimStringVisitor)
+}
+
+/* Custom deserializer for u16 values from strings or numbers */
+fn deserialize_u16<'de, D>(deserializer: D) -> Result<u16, D::Error>
+where
+  D: serde::Deserializer<'de>,
+{
+  struct U16Visitor;
+
+  impl<'de> serde::de::Visitor<'de> for U16Visitor {
+    type Value = u16;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+      formatter.write_str("a u16 number or numeric string")
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      u16::try_from(v).map_err(|_| E::custom("out of range for u16"))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      if v < 0 {
+        return Err(E::custom("negative value for u16"));
+      }
+      u16::try_from(v as u64).map_err(|_| E::custom("out of range for u16"))
+    }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      if !v.is_finite() {
+        return Err(E::custom("non-finite value for u16"));
+      }
+      if v.fract() != 0.0 {
+        return Err(E::custom("non-integer value for u16"));
+      }
+      if v < 0.0 {
+        return Err(E::custom("negative value for u16"));
+      }
+      u16::try_from(v as u64).map_err(|_| E::custom("out of range for u16"))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      let trimmed = v.trim();
+      trimmed
+        .parse::<u16>()
+        .map_err(|_| E::custom("invalid u16 string"))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      self.visit_str::<E>(&v)
+    }
+  }
+
+  deserializer.deserialize_any(U16Visitor)
+}
+
+/* Custom deserializer for u8 values from strings or numbers */
+fn deserialize_u8<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+  D: serde::Deserializer<'de>,
+{
+  struct U8Visitor;
+
+  impl<'de> serde::de::Visitor<'de> for U8Visitor {
+    type Value = u8;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+      formatter.write_str("a u8 number or numeric string")
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      u8::try_from(v).map_err(|_| E::custom("out of range for u8"))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      if v < 0 {
+        return Err(E::custom("negative value for u8"));
+      }
+      u8::try_from(v as u64).map_err(|_| E::custom("out of range for u8"))
+    }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      if !v.is_finite() {
+        return Err(E::custom("non-finite value for u8"));
+      }
+      if v.fract() != 0.0 {
+        return Err(E::custom("non-integer value for u8"));
+      }
+      if v < 0.0 {
+        return Err(E::custom("negative value for u8"));
+      }
+      u8::try_from(v as u64).map_err(|_| E::custom("out of range for u8"))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      let trimmed = v.trim();
+      trimmed
+        .parse::<u8>()
+        .map_err(|_| E::custom("invalid u8 string"))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      self.visit_str::<E>(&v)
+    }
+  }
+
+  deserializer.deserialize_any(U8Visitor)
+}
+
 /* Custom deserializer for percent values like "85" or "85%" */
 fn deserialize_percent_f32<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
   D: serde::Deserializer<'de>,
 {
-  let raw = String::deserialize(deserializer)?;
-  let trimmed = raw.trim().trim_end_matches('%').trim();
-  trimmed
-    .parse::<f32>()
-    .map_err(serde::de::Error::custom)
+  struct PercentF32Visitor;
+
+  impl<'de> serde::de::Visitor<'de> for PercentF32Visitor {
+    type Value = f32;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+      formatter.write_str("a percentage number as string (optional %) or number")
+    }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      if !v.is_finite() {
+        return Err(E::custom("non-finite percentage"));
+      }
+      Ok(v as f32)
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      Ok(v as f32)
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      let trimmed = v.trim().trim_end_matches('%').trim();
+      trimmed
+        .parse::<f32>()
+        .map_err(serde::de::Error::custom)
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+      E: serde::de::Error,
+    {
+      self.visit_str::<E>(&v)
+    }
+  }
+
+  deserializer.deserialize_any(PercentF32Visitor)
 }
 
 /* Compute raw score with weights */
@@ -323,6 +559,36 @@ mod tests {
     let b: PercentWrap = serde_json::from_str("{\"value\":\"85%\"}").unwrap();
     assert_eq!(a.value, 85.0);
     assert_eq!(b.value, 85.0);
+  }
+
+  /* CSV should accept header aliases and trim values */
+  #[test]
+  fn csv_aliases_and_trim_work() {
+    let csv_data = concat!(
+      "ID,Name,Generation,Location,Year,",
+      "germinationRate,growthScore,diseaseResistance,aromaScore\n",
+      " TV-001 , Yabukita , F1 , Shizuoka , 2024 , 92% , 4 , 4 , 3 \n",
+    );
+
+    let mut reader = csv::ReaderBuilder::new()
+      .has_headers(true)
+      .from_reader(csv_data.as_bytes());
+
+    let row = reader
+      .deserialize::<super::TeaVariety>()
+      .next()
+      .expect("missing row")
+      .expect("failed to parse row");
+
+    assert_eq!(row.id, "TV-001");
+    assert_eq!(row.name, "Yabukita");
+    assert_eq!(row.generation, "F1");
+    assert_eq!(row.location, "Shizuoka");
+    assert_eq!(row.year, 2024);
+    assert_eq!(row.germination_rate, 92.0);
+    assert_eq!(row.growth_score, 4);
+    assert_eq!(row.disease_resistance, 4);
+    assert_eq!(row.aroma_score, 3);
   }
 }
 
