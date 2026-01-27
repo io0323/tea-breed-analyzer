@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 
 import { DashboardView } from "./components/DashboardView";
 import { GraphView } from "./components/GraphView";
@@ -44,6 +45,7 @@ export default function App() {
   const [error, setError] = useState<string>("");
   const [view, setView] = useState<View>("dashboard");
   const [toast, setToast] = useState<string>("");
+  const [isFileDropHover, setIsFileDropHover] = useState<boolean>(false);
 
   const [query, setQuery] = useState<string>("");
   const [decisionFilter, setDecisionFilter] = useState<Decision | "all">("all");
@@ -51,22 +53,12 @@ export default function App() {
   const [yearFrom, setYearFrom] = useState<string>("");
   const [yearTo, setYearTo] = useState<string>("");
 
-  /* Pick a CSV file and run analysis automatically */
-  async function pickCsvAndAnalyze(): Promise<void> {
+  /* Load a CSV file path and run analysis */
+  async function loadAndAnalyze(path: string): Promise<void> {
     setError("");
     setIsLoading(true);
 
     try {
-      const path = await open({
-        multiple: false,
-        directory: false,
-        filters: [{ name: "CSV", extensions: ["csv"] }],
-      });
-
-      if (!path || Array.isArray(path)) {
-        return;
-      }
-
       setCsvPath(path);
 
       const data = await invoke<TeaVariety[]>("load_csv", { path });
@@ -93,6 +85,66 @@ export default function App() {
       setIsLoading(false);
     }
   }
+
+  /* Pick a CSV file and run analysis automatically */
+  async function pickCsvAndAnalyze(): Promise<void> {
+    setError("");
+    setIsLoading(true);
+
+    try {
+      const path = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+
+      if (!path || Array.isArray(path)) {
+        return;
+      }
+
+      await loadAndAnalyze(path);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  /* Listen to OS file drop events from Tauri */
+  useEffect(() => {
+    let unlistenDrop: (() => void) | null = null;
+    let unlistenHover: (() => void) | null = null;
+    let unlistenCancel: (() => void) | null = null;
+
+    const start = async (): Promise<void> => {
+      unlistenDrop = await listen<string[]>("tauri://file-drop", async (e) => {
+        const paths = e.payload ?? [];
+        const first = paths[0];
+        setIsFileDropHover(false);
+
+        if (!first) return;
+        if (!first.toLowerCase().endsWith(".csv")) {
+          setToast("CSV ファイルをドロップしてください");
+          return;
+        }
+        await loadAndAnalyze(first);
+      });
+
+      unlistenHover = await listen("tauri://file-drop-hover", () => {
+        setIsFileDropHover(true);
+      });
+
+      unlistenCancel = await listen("tauri://file-drop-cancelled", () => {
+        setIsFileDropHover(false);
+      });
+    };
+
+    void start();
+
+    return () => {
+      if (unlistenDrop) unlistenDrop();
+      if (unlistenHover) unlistenHover();
+      if (unlistenCancel) unlistenCancel();
+    };
+  }, []);
 
   /* Collect unique generation values */
   const generations = useMemo(() => {
@@ -168,6 +220,21 @@ export default function App() {
 
   return (
     <div className="min-h-full bg-slate-950 text-slate-100">
+      {isFileDropHover ? (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm">
+          <div className="mx-auto flex h-full max-w-3xl items-center justify-center p-6">
+            <div className="w-full rounded-2xl border border-dashed border-slate-500/60 bg-slate-900/40 p-10 text-center shadow-sm">
+              <div className="text-lg font-semibold text-slate-100">
+                CSV をここにドロップ
+              </div>
+              <div className="mt-2 text-sm text-slate-400">
+                ドロップすると自動で解析します
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="mx-auto flex max-w-6xl flex-col gap-4 p-4">
         <header className="flex items-center justify-between">
           <div className="flex flex-col gap-1">
