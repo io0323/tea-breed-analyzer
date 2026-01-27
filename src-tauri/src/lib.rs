@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+mod state;
+mod report;
+
+use state::{load_app_state, save_app_state};
+use report::{save_analysis_json, save_report_markdown};
+
 /* Decision categories for selection outcomes */
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -737,7 +743,18 @@ fn save_analysis_csv(path: String, rows: Vec<ExportRow>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-  use super::{analyze_one, deserialize_percent_f32, deserialize_u8, Decision, TeaVariety};
+  use super::{
+    analyze_one,
+    compute_view_model,
+    deserialize_percent_f32,
+    deserialize_u8,
+    Decision,
+    ExportRow,
+    SortDir,
+    SortKey,
+    TeaVariety,
+    ViewParams,
+  };
   use serde::Deserialize;
 
   /* Helper struct to directly test percent deserializer */
@@ -927,6 +944,174 @@ mod tests {
     assert_eq!(row.disease_resistance, 4);
     assert_eq!(row.aroma_score, 3);
   }
+
+  /* compute_view_model should filter/sort and return consistent view model */
+  #[test]
+  fn compute_view_model_filters_and_sorts() {
+    let rows = vec![
+      ExportRow {
+        id: "A-001".to_string(),
+        name: "Yabukita".to_string(),
+        generation: "F1".to_string(),
+        location: "Shizuoka".to_string(),
+        year: 2024,
+        germination_rate: 90.0,
+        growth_score: 4,
+        disease_resistance: 4,
+        aroma_score: 3,
+        total_score: 88.0,
+        decision: Decision::Keep,
+      },
+      ExportRow {
+        id: "A-002".to_string(),
+        name: "Okumidori".to_string(),
+        generation: "F1".to_string(),
+        location: "Kagoshima".to_string(),
+        year: 2023,
+        germination_rate: 70.0,
+        growth_score: 3,
+        disease_resistance: 3,
+        aroma_score: 2,
+        total_score: 62.0,
+        decision: Decision::Review,
+      },
+      ExportRow {
+        id: "B-001".to_string(),
+        name: "Saemidori".to_string(),
+        generation: "F2".to_string(),
+        location: "Shizuoka".to_string(),
+        year: 2022,
+        germination_rate: 65.0,
+        growth_score: 3,
+        disease_resistance: 3,
+        aroma_score: 2,
+        total_score: 60.0,
+        decision: Decision::Review,
+      },
+      ExportRow {
+        id: "C-001".to_string(),
+        name: "Yabukita Variant".to_string(),
+        generation: "F1".to_string(),
+        location: "Shizuoka".to_string(),
+        year: 2021,
+        germination_rate: 85.0,
+        growth_score: 4,
+        disease_resistance: 4,
+        aroma_score: 3,
+        total_score: 80.0,
+        decision: Decision::Keep,
+      },
+    ];
+
+    let params = ViewParams {
+      query: "yabu".to_string(),
+      decision: Some(Decision::Keep),
+      generation: Some("F1".to_string()),
+      year_from: Some(2022),
+      year_to: Some(2024),
+      sort_key: SortKey::Year,
+      sort_dir: SortDir::Asc,
+      top_n: 3,
+    };
+
+    let vm = compute_view_model(rows.clone(), params).unwrap();
+
+    /* generations should be derived from all rows, not only filtered */
+    assert_eq!(vm.generations, vec!["F1".to_string(), "F2".to_string()]);
+
+    /* Filtered rows: keep + F1 + year 2022..2024 + query 'yabu' => A-001 only */
+    assert_eq!(vm.filtered_rows.len(), 1);
+    assert_eq!(vm.filtered_rows[0].id, "A-001");
+
+    /* Summary should reflect filtered rows */
+    assert_eq!(vm.summary.total, 1);
+    assert_eq!(vm.summary.counts.keep, 1);
+    assert_eq!(vm.summary.counts.review, 0);
+    assert_eq!(vm.summary.counts.discard, 0);
+  }
+
+  /* compute_view_model should compute summary and chart series from filtered rows */
+  #[test]
+  fn compute_view_model_summary_and_charts() {
+    let rows = vec![
+      ExportRow {
+        id: "A".to_string(),
+        name: "A".to_string(),
+        generation: "F1".to_string(),
+        location: "X".to_string(),
+        year: 2023,
+        germination_rate: 0.0,
+        growth_score: 1,
+        disease_resistance: 1,
+        aroma_score: 1,
+        total_score: 80.0,
+        decision: Decision::Keep,
+      },
+      ExportRow {
+        id: "B".to_string(),
+        name: "B".to_string(),
+        generation: "F1".to_string(),
+        location: "X".to_string(),
+        year: 2023,
+        germination_rate: 0.0,
+        growth_score: 1,
+        disease_resistance: 1,
+        aroma_score: 1,
+        total_score: 60.0,
+        decision: Decision::Review,
+      },
+      ExportRow {
+        id: "C".to_string(),
+        name: "C".to_string(),
+        generation: "F2".to_string(),
+        location: "X".to_string(),
+        year: 2024,
+        germination_rate: 0.0,
+        growth_score: 1,
+        disease_resistance: 1,
+        aroma_score: 1,
+        total_score: 40.0,
+        decision: Decision::Discard,
+      },
+    ];
+
+    let params = ViewParams {
+      query: "".to_string(),
+      decision: None,
+      generation: None,
+      year_from: None,
+      year_to: None,
+      sort_key: SortKey::TotalScore,
+      sort_dir: SortDir::Desc,
+      top_n: 2,
+    };
+
+    let vm = compute_view_model(rows, params).unwrap();
+
+    assert_eq!(vm.summary.total, 3);
+    assert_eq!(vm.summary.counts.keep, 1);
+    assert_eq!(vm.summary.counts.review, 1);
+    assert_eq!(vm.summary.counts.discard, 1);
+    assert!((vm.summary.avg_score - (80.0 + 60.0 + 40.0) / 3.0).abs() < 1e-6);
+
+    /* Generation averages */
+    assert_eq!(vm.generation_averages.len(), 2);
+    assert_eq!(vm.generation_averages[0].generation, "F1");
+    assert!((vm.generation_averages[0].avg_score - 70.0).abs() < 1e-6);
+    assert_eq!(vm.generation_averages[0].count, 2);
+    assert_eq!(vm.generation_averages[1].generation, "F2");
+    assert!((vm.generation_averages[1].avg_score - 40.0).abs() < 1e-6);
+    assert_eq!(vm.generation_averages[1].count, 1);
+
+    /* Yearly trend */
+    assert_eq!(vm.yearly_trend.len(), 2);
+    assert_eq!(vm.yearly_trend[0].year, 2023);
+    assert!((vm.yearly_trend[0].avg_score - 70.0).abs() < 1e-6);
+    assert_eq!(vm.yearly_trend[0].count, 2);
+    assert_eq!(vm.yearly_trend[1].year, 2024);
+    assert!((vm.yearly_trend[1].avg_score - 40.0).abs() < 1e-6);
+    assert_eq!(vm.yearly_trend[1].count, 1);
+  }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -939,6 +1124,10 @@ pub fn run() {
       load_and_analyze_csv,
       analyze_varieties,
       compute_view_model,
+      load_app_state,
+      save_app_state,
+      save_analysis_json,
+      save_report_markdown,
       save_analysis_csv
     ])
     .run(tauri::generate_context!())
