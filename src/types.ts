@@ -90,3 +90,10 @@ export type ViewModel = {
   yearlyTrend: YearAvg[];
 };
 
+/* Persisted app state (aligned with Rust AppState) */
+export type AppState = {
+  csvPath: string;
+  params: ViewParams;
+  selectedId: string;
+};
+
