@@ -79,16 +79,28 @@ pub struct ExportRow {
 /* Validate TeaVariety domain constraints */
 fn validate_variety(variety: &TeaVariety) -> Result<(), String> {
   if !(0.0..=100.0).contains(&variety.germination_rate) {
-    return Err("germination_rate must be 0..=100".to_string());
+    return Err(format!(
+      "germination_rate={} は 0..=100 である必要があります",
+      variety.germination_rate
+    ));
   }
   if !(1..=5).contains(&variety.growth_score) {
-    return Err("growth_score must be 1..=5".to_string());
+    return Err(format!(
+      "growth_score={} は 1..=5 である必要があります",
+      variety.growth_score
+    ));
   }
   if !(1..=5).contains(&variety.disease_resistance) {
-    return Err("disease_resistance must be 1..=5".to_string());
+    return Err(format!(
+      "disease_resistance={} は 1..=5 である必要があります",
+      variety.disease_resistance
+    ));
   }
   if !(1..=5).contains(&variety.aroma_score) {
-    return Err("aroma_score must be 1..=5".to_string());
+    return Err(format!(
+      "aroma_score={} は 1..=5 である必要があります",
+      variety.aroma_score
+    ));
   }
   Ok(())
 }
@@ -179,7 +191,7 @@ where
       let trimmed = v.trim();
       trimmed
         .parse::<u16>()
-        .map_err(|_| E::custom("invalid u16 string"))
+        .map_err(|_| E::custom(format!("invalid u16 string: {trimmed:?}")))
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
@@ -247,7 +259,7 @@ where
       let trimmed = v.trim();
       trimmed
         .parse::<u8>()
-        .map_err(|_| E::custom("invalid u8 string"))
+        .map_err(|_| E::custom(format!("invalid u8 string: {trimmed:?}")))
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
@@ -299,7 +311,7 @@ where
       let trimmed = v.trim().trim_end_matches('%').trim();
       trimmed
         .parse::<f32>()
-        .map_err(serde::de::Error::custom)
+        .map_err(|_| serde::de::Error::custom(format!("invalid percent: {trimmed:?}")))
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
@@ -340,20 +352,65 @@ fn analyze_one(variety: &TeaVariety) -> AnalysisResult {
   }
 }
 
-/* Load tea varieties from a CSV file path */
-#[tauri::command]
-fn load_csv(path: String) -> Result<Vec<TeaVariety>, String> {
-  let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+/* Load tea varieties from a CSV file path (internal helper) */
+fn load_csv_file(path: &str) -> Result<Vec<TeaVariety>, String> {
+  let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
   let mut reader = csv::Reader::from_reader(file);
   let mut out: Vec<TeaVariety> = Vec::new();
 
   for (idx, row) in reader.deserialize::<TeaVariety>().enumerate() {
-    let variety = row.map_err(|e| format!("row {}: {}", idx + 1, e))?;
-    validate_variety(&variety)
-      .map_err(|e| format!("row {} (id={}): {}", idx + 1, variety.id, e))?;
+    let row_num = idx + 1;
+    let line_num = idx + 2;
+    let variety = row.map_err(|e| {
+      format!(
+        "CSV読み込みエラー\npath: {}\nrow: {} (line {})\n原因: {}",
+        path, row_num, line_num, e
+      )
+    })?;
+    validate_variety(&variety).map_err(|e| {
+      format!(
+        "CSV検証エラー\npath: {}\nrow: {} (line {})\nid: {}\n原因: {}",
+        path, row_num, line_num, variety.id, e
+      )
+    })?;
     out.push(variety);
   }
 
+  Ok(out)
+}
+
+/* Load tea varieties from a CSV file path */
+#[tauri::command]
+fn load_csv(path: String) -> Result<Vec<TeaVariety>, String> {
+  load_csv_file(&path)
+}
+
+/* Load a CSV and return analyzed rows (merged for UI/export) */
+#[tauri::command]
+fn load_and_analyze_csv(path: String) -> Result<Vec<ExportRow>, String> {
+  let data = load_csv_file(&path)?;
+
+  let mut out = data
+    .into_iter()
+    .map(|v| {
+      let a = analyze_one(&v);
+      ExportRow {
+        id: v.id,
+        name: v.name,
+        generation: v.generation,
+        location: v.location,
+        year: v.year,
+        germination_rate: v.germination_rate,
+        growth_score: v.growth_score,
+        disease_resistance: v.disease_resistance,
+        aroma_score: v.aroma_score,
+        total_score: a.total_score,
+        decision: a.decision,
+      }
+    })
+    .collect::<Vec<_>>();
+
+  out.sort_by(|a, b| b.total_score.total_cmp(&a.total_score));
   Ok(out)
 }
 
@@ -380,7 +437,7 @@ fn save_analysis_csv(path: String, rows: Vec<ExportRow>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-  use super::{analyze_one, deserialize_percent_f32, Decision, TeaVariety};
+  use super::{analyze_one, deserialize_percent_f32, deserialize_u8, Decision, TeaVariety};
   use serde::Deserialize;
 
   /* Helper struct to directly test percent deserializer */
@@ -388,6 +445,13 @@ mod tests {
   struct PercentWrap {
     #[serde(deserialize_with = "deserialize_percent_f32")]
     value: f32,
+  }
+
+  /* Helper struct to directly test u8 deserializer */
+  #[derive(Debug, Deserialize)]
+  struct U8Wrap {
+    #[serde(deserialize_with = "deserialize_u8")]
+    value: u8,
   }
 
   /* Decision boundary: >= 75 => keep */
@@ -457,6 +521,83 @@ mod tests {
     assert_eq!(b.value, 85.0);
   }
 
+  /* u8 deserializer error should include offending value */
+  #[test]
+  fn deserialize_u8_includes_value_in_error() {
+    let err = serde_json::from_str::<U8Wrap>("{\"value\":\"x\"}").unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("invalid u8 string"));
+    assert!(msg.contains("\"x\""));
+
+    let ok = serde_json::from_str::<U8Wrap>("{\"value\":\"5\"}").unwrap();
+    assert_eq!(ok.value, 5);
+  }
+
+  /* load_csv error should include row/line/path for parse failures */
+  #[test]
+  fn load_csv_error_contains_context() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let csv_data = concat!(
+      "id,name,generation,location,year,germination_rate,",
+      "growth_score,disease_resistance,aroma_score\n",
+      "TV-001,Yabukita,F1,Shizuoka,2024,92%,x,4,3\n",
+    );
+
+    let mut path = std::env::temp_dir();
+    let suffix = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap()
+      .as_nanos();
+    path.push(format!(
+      "tea_breed_analyzer_load_csv_error_{}_{}.csv",
+      std::process::id(),
+      suffix
+    ));
+
+    std::fs::write(&path, csv_data).unwrap();
+    let res = super::load_csv(path.to_string_lossy().to_string());
+    let _ = std::fs::remove_file(&path);
+
+    let err = res.unwrap_err();
+    assert!(err.contains("CSV読み込みエラー"));
+    assert!(err.contains("path:"));
+    assert!(err.contains("row: 1"));
+    assert!(err.contains("line 2"));
+  }
+
+  /* load_and_analyze_csv should return merged rows for UI */
+  #[test]
+  fn load_and_analyze_csv_returns_merged_rows() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let csv_data = concat!(
+      "id,name,generation,location,year,germination_rate,",
+      "growth_score,disease_resistance,aroma_score\n",
+      "TV-001,Yabukita,F1,Shizuoka,2024,92%,4,4,3\n",
+    );
+
+    let mut path = std::env::temp_dir();
+    let suffix = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap()
+      .as_nanos();
+    path.push(format!(
+      "tea_breed_analyzer_load_and_analyze_{}_{}.csv",
+      std::process::id(),
+      suffix
+    ));
+
+    std::fs::write(&path, csv_data).unwrap();
+    let res = super::load_and_analyze_csv(path.to_string_lossy().to_string());
+    let _ = std::fs::remove_file(&path);
+
+    let rows = res.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "TV-001");
+    assert!(rows[0].total_score > 0.0);
+  }
+
   /* CSV should accept header aliases and trim values */
   #[test]
   fn csv_aliases_and_trim_work() {
@@ -495,6 +636,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .invoke_handler(tauri::generate_handler![
       load_csv,
+      load_and_analyze_csv,
       analyze_varieties,
       save_analysis_csv
     ])

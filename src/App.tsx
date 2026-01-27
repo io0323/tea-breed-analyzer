@@ -7,11 +7,9 @@ import { DashboardView } from "./components/DashboardView";
 import { GraphView } from "./components/GraphView";
 import { SummaryPanel } from "./components/SummaryPanel";
 import type {
-  AnalysisResult,
   Decision,
   ExportRow,
   Row,
-  TeaVariety,
 } from "./types";
 
 type View = "dashboard" | "graphs";
@@ -66,22 +64,7 @@ export default function App() {
 
     try {
       setCsvPath(path);
-
-      const data = await invoke<TeaVariety[]>("load_csv", { path });
-      const results = await invoke<AnalysisResult[]>("analyze_varieties", {
-        data,
-      });
-
-      const resultById = new Map(results.map((r) => [r.id, r]));
-      const merged = data
-        .map((v) => {
-          const a = resultById.get(v.id);
-          if (!a) return null;
-          return { ...v, ...a };
-        })
-        .filter((v): v is Row => v !== null)
-        .sort((a, b) => b.total_score - a.total_score);
-
+      const merged = await invoke<Row[]>("load_and_analyze_csv", { path });
       setRows(merged);
       setSelectedId(merged[0]?.id ?? "");
     } catch (e) {
@@ -326,7 +309,7 @@ export default function App() {
         {error ? (
           <div
             className="rounded-lg bg-rose-500/10 p-3 text-sm text-rose-200
-              ring-1 ring-rose-500/20"
+              ring-1 ring-rose-500/20 whitespace-pre-wrap break-words"
           >
             {error}
           </div>
