@@ -53,6 +53,12 @@ export default function App() {
   const [yearFrom, setYearFrom] = useState<string>("");
   const [yearTo, setYearTo] = useState<string>("");
 
+  type SortKey = "total_score" | "year" | "name" | "generation" | "decision" | "id";
+  type SortDir = "asc" | "desc";
+
+  const [sortKey, setSortKey] = useState<SortKey>("total_score");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
   /* Load a CSV file path and run analysis */
   async function loadAndAnalyze(path: string): Promise<void> {
     setError("");
@@ -183,20 +189,49 @@ export default function App() {
     });
   }, [rows, query, decisionFilter, generationFilter, yearFrom, yearTo]);
 
+  /* Sort rows for table/export (independent from chart order) */
+  const displayRows = useMemo(() => {
+    const decisionOrder: Record<Decision, number> = {
+      keep: 0,
+      review: 1,
+      discard: 2,
+    };
+
+    const sorted = [...filteredRows].sort((a, b) => {
+      let cmp = 0;
+
+      if (sortKey === "total_score") cmp = a.total_score - b.total_score;
+      else if (sortKey === "year") cmp = a.year - b.year;
+      else if (sortKey === "name") cmp = a.name.localeCompare(b.name);
+      else if (sortKey === "generation") cmp = a.generation.localeCompare(b.generation);
+      else if (sortKey === "decision") cmp = decisionOrder[a.decision] - decisionOrder[b.decision];
+      else if (sortKey === "id") cmp = a.id.localeCompare(b.id);
+
+      if (cmp === 0) {
+        /* Stable tie-breaker */
+        cmp = a.id.localeCompare(b.id);
+      }
+
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    return sorted;
+  }, [filteredRows, sortKey, sortDir]);
+
   /* Ensure selection exists in filtered list */
   const effectiveSelectedId = useMemo(() => {
-    if (filteredRows.some((r) => r.id === selectedId)) {
+    if (displayRows.some((r) => r.id === selectedId)) {
       return selectedId;
     }
-    return filteredRows[0]?.id ?? "";
-  }, [filteredRows, selectedId]);
+    return displayRows[0]?.id ?? "";
+  }, [displayRows, selectedId]);
 
   /* Save currently filtered rows to a CSV file */
   async function exportFilteredCsv(): Promise<void> {
     setError("");
     setToast("");
 
-    if (filteredRows.length === 0) {
+    if (displayRows.length === 0) {
       setToast("エクスポート対象がありません（フィルタ後 0 件）");
       return;
     }
@@ -209,7 +244,7 @@ export default function App() {
 
       if (!path) return;
 
-      const exportRows: ExportRow[] = filteredRows;
+      const exportRows: ExportRow[] = displayRows;
       await invoke("save_analysis_csv", { path, rows: exportRows });
       setToast("CSV を保存しました");
     } catch (e) {
@@ -396,10 +431,20 @@ export default function App() {
 
         {view === "dashboard" ? (
           <DashboardView
-            rows={filteredRows}
+            rows={displayRows}
             totalCount={rows.length}
             selectedId={effectiveSelectedId}
             onSelectId={setSelectedId}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSortChange={(nextKey) => {
+              if (nextKey === sortKey) {
+                setSortDir(sortDir === "asc" ? "desc" : "asc");
+              } else {
+                setSortKey(nextKey);
+                setSortDir(nextKey === "total_score" ? "desc" : "asc");
+              }
+            }}
           />
         ) : (
           <GraphView rows={filteredRows} />

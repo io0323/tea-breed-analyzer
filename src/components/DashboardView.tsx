@@ -34,7 +34,51 @@ type Props = {
   totalCount?: number;
   selectedId: string;
   onSelectId: (id: string) => void;
+  sortKey?: "total_score" | "year" | "name" | "generation" | "decision" | "id";
+  sortDir?: "asc" | "desc";
+  onSortChange?: (
+    nextKey: "total_score" | "year" | "name" | "generation" | "decision" | "id",
+  ) => void;
 };
+
+/* Sort icon helper */
+function sortIcon(
+  key: NonNullable<Props["sortKey"]>,
+  sortKey?: Props["sortKey"],
+  sortDir?: Props["sortDir"],
+): string {
+  if (key !== sortKey) return "";
+  return sortDir === "asc" ? "▲" : "▼";
+}
+
+/* Header cell button */
+function HeaderButton({
+  label,
+  keyName,
+  sortKey,
+  sortDir,
+  onSortChange,
+}: {
+  label: string;
+  keyName: NonNullable<Props["sortKey"]>;
+  sortKey?: Props["sortKey"];
+  sortDir?: Props["sortDir"];
+  onSortChange?: Props["onSortChange"];
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={() => onSortChange?.(keyName)}
+      className="inline-flex items-center gap-1 text-left text-xs font-medium
+        text-slate-300 hover:text-slate-100"
+    >
+      <span>{label}</span>
+      <span className="text-[10px] text-slate-400">
+        {sortIcon(keyName, sortKey, sortDir)}
+      </span>
+    </button>
+  );
+}
 
 /* Minimal dashboard: table + selected card */
 export function DashboardView({
@@ -42,6 +86,9 @@ export function DashboardView({
   totalCount,
   selectedId,
   onSelectId,
+  sortKey,
+  sortDir,
+  onSortChange,
 }: Props): ReactElement {
   const selected = rows.find((r) => r.id === selectedId) ?? null;
 
@@ -66,12 +113,60 @@ export function DashboardView({
             <table className="w-full border-collapse text-left text-sm">
               <thead className="sticky top-0 bg-slate-950/80 backdrop-blur">
                 <tr className="text-xs text-slate-300">
-                  <th className="px-3 py-2 font-medium">ID</th>
-                  <th className="px-3 py-2 font-medium">名前</th>
-                  <th className="px-3 py-2 font-medium">世代</th>
-                  <th className="px-3 py-2 font-medium">年</th>
-                  <th className="px-3 py-2 font-medium">総合</th>
-                  <th className="px-3 py-2 font-medium">判定</th>
+                  <th className="px-3 py-2">
+                    <HeaderButton
+                      label="ID"
+                      keyName="id"
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSortChange={onSortChange}
+                    />
+                  </th>
+                  <th className="px-3 py-2">
+                    <HeaderButton
+                      label="名前"
+                      keyName="name"
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSortChange={onSortChange}
+                    />
+                  </th>
+                  <th className="px-3 py-2">
+                    <HeaderButton
+                      label="世代"
+                      keyName="generation"
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSortChange={onSortChange}
+                    />
+                  </th>
+                  <th className="px-3 py-2">
+                    <HeaderButton
+                      label="年"
+                      keyName="year"
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSortChange={onSortChange}
+                    />
+                  </th>
+                  <th className="px-3 py-2">
+                    <HeaderButton
+                      label="総合"
+                      keyName="total_score"
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSortChange={onSortChange}
+                    />
+                  </th>
+                  <th className="px-3 py-2">
+                    <HeaderButton
+                      label="判定"
+                      keyName="decision"
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSortChange={onSortChange}
+                    />
+                  </th>
                 </tr>
               </thead>
               <tbody>
