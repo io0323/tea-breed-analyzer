@@ -9,6 +9,62 @@ pub enum Decision {
   Discard,
 }
 
+/* Analysis config shared with the UI */
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct AnalysisWeights {
+  pub germination: f32,
+  pub growth: f32,
+  pub disease: f32,
+  pub aroma: f32,
+}
+
+/* Analysis configuration (weights + thresholds) */
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct AnalysisConfig {
+  pub weights: AnalysisWeights,
+  pub keep_threshold: f32,
+  pub review_threshold: f32,
+  pub normalize_to_100: bool,
+}
+
+/* Default config matching current product logic */
+fn default_config() -> AnalysisConfig {
+  AnalysisConfig {
+    weights: AnalysisWeights {
+      germination: 0.4,
+      growth: 0.3,
+      disease: 0.2,
+      aroma: 0.1,
+    },
+    keep_threshold: 75.0,
+    review_threshold: 50.0,
+    normalize_to_100: true,
+  }
+}
+
+/* Validate AnalysisConfig domain constraints */
+fn validate_config(config: &AnalysisConfig) -> Result<(), String> {
+  let w = &config.weights;
+  let weights = [w.germination, w.growth, w.disease, w.aroma];
+  if weights.iter().any(|v| !v.is_finite() || *v < 0.0) {
+    return Err("weights must be finite and >= 0".to_string());
+  }
+  let sum = weights.iter().sum::<f32>();
+  if sum <= 0.0 {
+    return Err("sum(weights) must be > 0".to_string());
+  }
+  if !config.keep_threshold.is_finite() || !config.review_threshold.is_finite() {
+    return Err("thresholds must be finite".to_string());
+  }
+  if config.keep_threshold < config.review_threshold {
+    return Err("keep_threshold must be >= review_threshold".to_string());
+  }
+  if config.review_threshold < 0.0 {
+    return Err("review_threshold must be >= 0".to_string());
+  }
+  Ok(())
+}
+
 /* Tea variety data model for CSV/JSON interop */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeaVariety {
@@ -77,21 +133,44 @@ where
     .map_err(serde::de::Error::custom)
 }
 
-/* Compute total score and decision for a variety */
-fn analyze_one(variety: &TeaVariety) -> AnalysisResult {
-  /* Raw score max is 70.0 with current weights; normalize to 0..=100 */
-  const RAW_MAX_SCORE: f32 = 70.0;
+/* Compute raw score with weights */
+fn raw_score_with_config(variety: &TeaVariety, config: &AnalysisConfig) -> f32 {
+  let w = &config.weights;
+  variety.germination_rate * w.germination
+    + (variety.growth_score as f32) * 10.0 * w.growth
+    + (variety.disease_resistance as f32) * 10.0 * w.disease
+    + (variety.aroma_score as f32) * 10.0 * w.aroma
+}
 
-  let raw_score = variety.germination_rate * 0.4
-    + (variety.growth_score as f32) * 10.0 * 0.3
-    + (variety.disease_resistance as f32) * 10.0 * 0.2
-    + (variety.aroma_score as f32) * 10.0 * 0.1;
+/* Compute the theoretical maximum raw score for normalization */
+fn raw_max_score(config: &AnalysisConfig) -> f32 {
+  let w = &config.weights;
+  (100.0 * w.germination)
+    + (50.0 * w.growth)
+    + (50.0 * w.disease)
+    + (50.0 * w.aroma)
+}
 
-  let total_score = (raw_score / RAW_MAX_SCORE) * 100.0;
+/* Compute total score and decision for a variety (with config) */
+fn analyze_one_with_config(
+  variety: &TeaVariety,
+  config: &AnalysisConfig,
+) -> AnalysisResult {
+  let raw_score = raw_score_with_config(variety, config);
+  let total_score = if config.normalize_to_100 {
+    let max = raw_max_score(config);
+    if max > 0.0 {
+      (raw_score / max) * 100.0
+    } else {
+      0.0
+    }
+  } else {
+    raw_score
+  };
 
-  let decision = if total_score >= 75.0 {
+  let decision = if total_score >= config.keep_threshold {
     Decision::Keep
-  } else if total_score >= 50.0 {
+  } else if total_score >= config.review_threshold {
     Decision::Review
   } else {
     Decision::Discard
@@ -102,6 +181,11 @@ fn analyze_one(variety: &TeaVariety) -> AnalysisResult {
     total_score,
     decision,
   }
+}
+
+/* Compute total score and decision for a variety (default config) */
+fn analyze_one(variety: &TeaVariety) -> AnalysisResult {
+  analyze_one_with_config(variety, &default_config())
 }
 
 /* Load tea varieties from a CSV file path */
@@ -128,6 +212,20 @@ fn analyze_varieties(data: Vec<TeaVariety>) -> Result<Vec<AnalysisResult>, Strin
   Ok(results)
 }
 
+/* Analyze tea varieties with a custom config */
+#[tauri::command]
+fn analyze_varieties_with_config(
+  data: Vec<TeaVariety>,
+  config: AnalysisConfig,
+) -> Result<Vec<AnalysisResult>, String> {
+  validate_config(&config)?;
+  let results = data
+    .iter()
+    .map(|v| analyze_one_with_config(v, &config))
+    .collect::<Vec<_>>();
+  Ok(results)
+}
+
 /* Save analysis rows to CSV file */
 #[tauri::command]
 fn save_analysis_csv(path: String, rows: Vec<ExportRow>) -> Result<(), String> {
@@ -144,7 +242,13 @@ fn save_analysis_csv(path: String, rows: Vec<ExportRow>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-  use super::{analyze_one, deserialize_percent_f32, Decision, TeaVariety};
+  use super::{
+    analyze_one_with_config,
+    default_config,
+    deserialize_percent_f32,
+    Decision,
+    TeaVariety,
+  };
   use serde::Deserialize;
 
   /* Helper struct to directly test percent deserializer */
@@ -168,7 +272,7 @@ mod tests {
       disease_resistance: 4,
       aroma_score: 3,
     };
-    let r = analyze_one(&v);
+    let r = analyze_one_with_config(&v, &default_config());
     assert!(r.total_score >= 75.0);
     assert_eq!(r.decision, Decision::Keep);
   }
@@ -187,7 +291,7 @@ mod tests {
       disease_resistance: 3,
       aroma_score: 2,
     };
-    let r = analyze_one(&v);
+    let r = analyze_one_with_config(&v, &default_config());
     assert!(r.total_score >= 50.0);
     assert!(r.total_score < 75.0);
     assert_eq!(r.decision, Decision::Review);
@@ -207,7 +311,7 @@ mod tests {
       disease_resistance: 1,
       aroma_score: 1,
     };
-    let r = analyze_one(&v);
+    let r = analyze_one_with_config(&v, &default_config());
     assert!(r.total_score < 50.0);
     assert_eq!(r.decision, Decision::Discard);
   }
@@ -230,6 +334,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       load_csv,
       analyze_varieties,
+      analyze_varieties_with_config,
       save_analysis_csv
     ])
     .run(tauri::generate_context!())
