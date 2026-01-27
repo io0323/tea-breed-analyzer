@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
@@ -7,6 +7,7 @@ import { DashboardView } from "./components/DashboardView";
 import { GraphView } from "./components/GraphView";
 import { SummaryPanel } from "./components/SummaryPanel";
 import type {
+  AppState,
   Decision,
   ExportRow,
   Row,
@@ -58,6 +59,8 @@ export default function App() {
   const [sortKey, setSortKey] = useState<SortKey>("total_score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
+  const hasRestoredStateRef = useRef<boolean>(false);
+
   const [viewModel, setViewModel] = useState<ViewModel>({
     generations: [],
     filteredRows: [],
@@ -73,7 +76,10 @@ export default function App() {
   });
 
   /* Load a CSV file path and run analysis */
-  async function loadAndAnalyze(path: string): Promise<void> {
+  async function loadAndAnalyze(
+    path: string,
+    preferredSelectedId?: string,
+  ): Promise<void> {
     setError("");
     setIsLoading(true);
 
@@ -81,7 +87,11 @@ export default function App() {
       setCsvPath(path);
       const merged = await invoke<Row[]>("load_and_analyze_csv", { path });
       setRows(merged);
-      setSelectedId(merged[0]?.id ?? "");
+      if (preferredSelectedId && merged.some((r) => r.id === preferredSelectedId)) {
+        setSelectedId(preferredSelectedId);
+      } else {
+        setSelectedId(merged[0]?.id ?? "");
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -147,6 +157,48 @@ export default function App() {
       if (unlistenDrop) unlistenDrop();
       if (unlistenHover) unlistenHover();
       if (unlistenCancel) unlistenCancel();
+    };
+  }, []);
+
+  /* Restore last app state on startup */
+  useEffect(() => {
+    let cancelled = false;
+
+    const restore = async (): Promise<void> => {
+      try {
+        const state = await invoke<AppState | null>("load_app_state");
+        if (cancelled) return;
+        if (!state) {
+          hasRestoredStateRef.current = true;
+          return;
+        }
+
+        setQuery(state.params.query);
+        setDecisionFilter(state.params.decision ?? "all");
+        setGenerationFilter(state.params.generation ?? "all");
+        setYearFrom(state.params.yearFrom !== null ? String(state.params.yearFrom) : "");
+        setYearTo(state.params.yearTo !== null ? String(state.params.yearTo) : "");
+        setSortKey(state.params.sortKey);
+        setSortDir(state.params.sortDir);
+
+        if (state.csvPath) {
+          await loadAndAnalyze(state.csvPath, state.selectedId);
+        } else {
+          setCsvPath("");
+          setRows([]);
+          setSelectedId(state.selectedId ?? "");
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setError(message);
+      } finally {
+        hasRestoredStateRef.current = true;
+      }
+    };
+
+    void restore();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -231,6 +283,46 @@ export default function App() {
     return displayRows[0]?.id ?? "";
   }, [displayRows, selectedId]);
 
+  /* Persist app state (debounced) */
+  useEffect(() => {
+    if (!hasRestoredStateRef.current) return;
+
+    const params: ViewParams = {
+      query,
+      decision: decisionFilter === "all" ? null : decisionFilter,
+      generation: generationFilter === "all" ? null : generationFilter,
+      yearFrom: yearFrom.trim() ? Number(yearFrom) : null,
+      yearTo: yearTo.trim() ? Number(yearTo) : null,
+      sortKey,
+      sortDir,
+      topN: 3,
+    };
+
+    const state: AppState = {
+      csvPath,
+      params,
+      selectedId: effectiveSelectedId,
+    };
+
+    const handle = window.setTimeout(() => {
+      void invoke("save_app_state", { state });
+    }, 500);
+
+    return () => {
+      window.clearTimeout(handle);
+    };
+  }, [
+    csvPath,
+    query,
+    decisionFilter,
+    generationFilter,
+    yearFrom,
+    yearTo,
+    sortKey,
+    sortDir,
+    effectiveSelectedId,
+  ]);
+
   /* Save currently filtered rows to a CSV file */
   async function exportFilteredCsv(): Promise<void> {
     setError("");
@@ -252,6 +344,53 @@ export default function App() {
       const exportRows: ExportRow[] = displayRows;
       await invoke("save_analysis_csv", { path, rows: exportRows });
       setToast("CSV を保存しました");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+    }
+  }
+
+  /* Save filtered rows as JSON */
+  async function exportFilteredJson(): Promise<void> {
+    setError("");
+    setToast("");
+
+    if (displayRows.length === 0) {
+      setToast("エクスポート対象がありません（フィルタ後 0 件）");
+      return;
+    }
+
+    try {
+      const path = await save({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        defaultPath: "tea_breed_analysis.json",
+      });
+
+      if (!path) return;
+
+      const exportRows: ExportRow[] = displayRows;
+      await invoke("save_analysis_json", { path, rows: exportRows });
+      setToast("JSON を保存しました");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+    }
+  }
+
+  /* Save a Markdown report for the current filtered view */
+  async function exportReportMarkdown(): Promise<void> {
+    setError("");
+    setToast("");
+
+    try {
+      const path = await save({
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+        defaultPath: "tea_breed_report.md",
+      });
+
+      if (!path) return;
+      await invoke("save_report_markdown", { path, viewModel });
+      setToast("Markdown レポートを保存しました");
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -324,6 +463,28 @@ export default function App() {
               disabled={isLoading || rows.length === 0}
             >
               CSV 出力
+            </button>
+
+            <button
+              type="button"
+              onClick={exportFilteredJson}
+              className="rounded-lg bg-slate-900/60 px-4 py-2 text-sm font-medium
+                text-slate-200 shadow-sm ring-1 ring-slate-800
+                hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isLoading || rows.length === 0}
+            >
+              JSON 出力
+            </button>
+
+            <button
+              type="button"
+              onClick={exportReportMarkdown}
+              className="rounded-lg bg-slate-900/60 px-4 py-2 text-sm font-medium
+                text-slate-200 shadow-sm ring-1 ring-slate-800
+                hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isLoading}
+            >
+              レポート(.md)
             </button>
           </div>
         </header>
