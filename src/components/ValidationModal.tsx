@@ -5,6 +5,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   report: CsvValidationReport | null;
+  onSelectRow?: (id: string) => void;
 };
 
 export function ValidationModal({ open, onClose, report }: Props): ReactElement | null {
@@ -41,10 +42,28 @@ export function ValidationModal({ open, onClose, report }: Props): ReactElement 
                   <ol className="space-y-2">
                     {report.issues.map((it) => (
                       <li key={`${it.row}-${it.line}`} className="text-sm">
-                        <div className="text-slate-300 font-mono">
-                          row:{it.row} line:{it.line} id:{it.id ?? "-"}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-slate-300 font-mono">
+                            row:{it.row} line:{it.line} id:{it.id ?? "-"}
+                          </div>
+                          {it.id ? (
+                            <button
+                              type="button"
+                              className="text-xs text-sky-300 hover:underline"
+                              onClick={() => {
+                                // call parent via DOM event - replaced by prop in App usage
+                                const evt = new CustomEvent("validation:select", {
+                                  detail: { id: it.id },
+                                });
+                                window.dispatchEvent(evt);
+                                onClose();
+                              }}
+                            >
+                              テーブルで表示
+                            </button>
+                          ) : null}
                         </div>
-                        <div className="text-rose-300">{it.message}</div>
+                        <div className="text-rose-300 mt-1">{it.message}</div>
                       </li>
                     ))}
                   </ol>

@@ -461,7 +461,7 @@ export default function App() {
 
             <button
               type="button"
-              onClick={async () => {
+            onClick={async () => {
                 setError("");
                 setIsLoading(true);
                 try {
@@ -682,6 +682,10 @@ export default function App() {
       open={isValidationOpen}
       onClose={() => setIsValidationOpen(false)}
       report={validationReport}
+      onSelectRow={(id) => {
+        setSelectedId(id);
+        setView("dashboard");
+      }}
     />
     </>
   );

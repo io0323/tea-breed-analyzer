@@ -112,4 +112,3 @@ export type CsvValidationReport = {
   errorRows: number;
   issues: CsvIssue[];
 };
-
