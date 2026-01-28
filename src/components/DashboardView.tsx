@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { Row } from "../types";
 import type { ReactElement } from "react";
 
@@ -92,6 +93,24 @@ export function DashboardView({
 }: Props): ReactElement {
   const selected = rows.find((r) => r.id === selectedId) ?? null;
 
+  useEffect(() => {
+    if (!selectedId) return;
+    const el = document.getElementById(`row-${selectedId}`);
+    if (!el) return;
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    } catch {
+      // ignore
+    }
+    el.classList.add("ring-2", "ring-sky-500/40", "animate-pulse");
+    const t = window.setTimeout(() => {
+      el.classList.remove("ring-2", "ring-sky-500/40", "animate-pulse");
+    }, 1500);
+    return () => {
+      window.clearTimeout(t);
+    };
+  }, [selectedId]);
+
   return (
     <div className="grid grid-cols-12 gap-4">
       <section className="col-span-7">
@@ -176,6 +195,7 @@ export function DashboardView({
 
                   return (
                     <tr
+                      id={`row-${r.id}`}
                       key={r.id}
                       onClick={() => onSelectId(r.id)}
                       className={
