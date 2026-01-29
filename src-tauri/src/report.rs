@@ -135,6 +135,33 @@ pub fn save_report_markdown(path: String, view_model: ViewModel) -> Result<(), S
   Ok(())
 }
 
+/* Save validation issues as JSON */
+#[tauri::command]
+pub fn save_issues_json(path: String, issues: Vec<crate::CsvIssue>) -> Result<(), String> {
+  let bytes = serde_json::to_vec_pretty(&issues).map_err(|e| e.to_string())?;
+  std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+  Ok(())
+}
+
+/* Save validation issues as CSV */
+#[tauri::command]
+pub fn save_issues_csv(path: String, issues: Vec<crate::CsvIssue>) -> Result<(), String> {
+  let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+  let mut w = csv::Writer::from_writer(file);
+  for it in issues {
+    // simple CSV row: row,line,id,message
+    w.write_record(&[
+      it.row.to_string(),
+      it.line.to_string(),
+      it.id.clone().unwrap_or_default(),
+      it.message.clone(),
+    ])
+    .map_err(|e| e.to_string())?;
+  }
+  w.flush().map_err(|e| e.to_string())?;
+  Ok(())
+}
+
 /* Convert Decision to a human label */
 #[allow(dead_code)]
 fn decision_label(decision: Decision) -> &'static str {

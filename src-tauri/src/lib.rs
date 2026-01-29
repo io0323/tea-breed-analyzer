@@ -5,7 +5,7 @@ mod state;
 mod report;
 
 use state::{load_app_state, save_app_state};
-use report::{save_analysis_json, save_report_markdown};
+use report::{save_analysis_json, save_report_markdown, save_issues_json, save_issues_csv};
 
 /* Decision categories for selection outcomes */
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1332,6 +1332,8 @@ pub fn run() {
       save_app_state,
       save_analysis_json,
       save_report_markdown,
+      save_issues_json,
+      save_issues_csv,
       save_analysis_csv
     ])
     .run(tauri::generate_context!())
