@@ -95,9 +95,7 @@ export type AppState = {
   csvPath: string;
   params: ViewParams;
   selectedId: string;
-};
-
-/* CSV validation report types from Rust */
+};/* CSV validation report types from Rust */
 export type CsvIssue = {
   row: number;
   line: number;
