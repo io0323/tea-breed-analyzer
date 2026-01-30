@@ -100,6 +100,11 @@ export function ValidationModal({ open, onClose, report }: Props): ReactElement 
                             <div className="text-slate-300 font-mono">
                               row:{it.row} line:{it.line} id:{it.id ?? "-"}
                             </div>
+                            {it.expected ? (
+                              <div className="ml-2 text-xs text-slate-400">
+                                期待値: {it.expected}
+                              </div>
+                            ) : null}
                           </div>
                           {it.id ? (
                             <button

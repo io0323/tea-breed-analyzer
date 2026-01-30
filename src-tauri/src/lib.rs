@@ -791,6 +791,7 @@ pub struct CsvIssue {
   pub line: usize,
   pub id: Option<String>,
   pub message: String,
+  pub expected: Option<String>,
 }
 
 /* CSV validation report (collects issues without failing fast) */
@@ -823,18 +824,27 @@ fn validate_csv(path: String) -> Result<CsvValidationReport, String> {
     let line_num = idx + 2;
     report.total_rows += 1;
 
-    match row {
+      match row {
       Ok(variety) => match validate_variety(&variety) {
         Ok(()) => {
           report.ok_rows += 1;
         }
         Err(msg) => {
           report.error_rows += 1;
+          // derive expected value based on message or field
+          let expected = if msg.contains("germination_rate") {
+            Some("0..=100".to_string())
+          } else if msg.contains("growth_score") || msg.contains("disease_resistance") || msg.contains("aroma_score") {
+            Some("1..=5".to_string())
+          } else {
+            None
+          };
           report.issues.push(CsvIssue {
             row: row_num,
             line: line_num,
             id: Some(variety.id),
             message: msg,
+            expected,
           });
         }
       },
@@ -845,6 +855,7 @@ fn validate_csv(path: String) -> Result<CsvValidationReport, String> {
           line: line_num,
           id: None,
           message: e.to_string(),
+          expected: None,
         });
       }
     }

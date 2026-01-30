@@ -155,6 +155,7 @@ pub fn save_issues_csv(path: String, issues: Vec<crate::CsvIssue>) -> Result<(),
       it.line.to_string(),
       it.id.clone().unwrap_or_default(),
       it.message.clone(),
+      it.expected.clone().unwrap_or_default(),
     ])
     .map_err(|e| e.to_string())?;
   }
