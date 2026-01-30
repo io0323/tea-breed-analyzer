@@ -101,6 +101,7 @@ export type CsvIssue = {
   line: number;
   id: string | null;
   message: string;
+  expected?: string | null;
 };
 
 export type CsvValidationReport = {
