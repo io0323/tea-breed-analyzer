@@ -1,4 +1,5 @@
 use crate::{CsvIssue, TeaVariety};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +33,22 @@ fn check_rule(variety: &TeaVariety, rule: &ValidatorRule) -> Option<String> {
         "gte" => if v >= t { None } else { Some(format!("{} >= {}", v, t)) },
         "lte" => if v <= t { None } else { Some(format!("{} <= {}", v, t)) },
         _ => None,
+      }
+    }
+    "name" => {
+      if rule.op == "re" || rule.op == "matches" {
+        match Regex::new(&rule.value) {
+          Ok(re) => {
+            if re.is_match(&variety.name) {
+              None
+            } else {
+              Some(format!("name !~ {}", rule.value))
+            }
+          }
+          Err(e) => Some(format!("invalid regex: {}", e)),
+        }
+      } else {
+        None
       }
     }
     _ => None,
