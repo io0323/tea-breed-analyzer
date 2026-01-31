@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { ValidationModal } from "./components/ValidationModal";
 import type { CsvValidationReport } from "./types";
+import { RuleEditor } from "./components/RuleEditor";
 
 type View = "dashboard" | "graphs";
 
@@ -53,6 +54,7 @@ export default function App() {
   const [isFileDropHover, setIsFileDropHover] = useState<boolean>(false);
   const [isValidationOpen, setIsValidationOpen] = useState<boolean>(false);
   const [validationReport, setValidationReport] = useState<CsvValidationReport | null>(null);
+  const [isRuleEditorOpen, setIsRuleEditorOpen] = useState<boolean>(false);
 
   const [query, setQuery] = useState<string>("");
   const [decisionFilter, setDecisionFilter] = useState<Decision | "all">("all");
@@ -458,6 +460,15 @@ export default function App() {
             >
               {isLoading ? "読み込み中..." : "CSV を選択"}
             </button>
+            <button
+              type="button"
+              onClick={() => setIsRuleEditorOpen(true)}
+              className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium
+                shadow-sm ring-1 ring-slate-700 hover:bg-slate-750
+                disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              ルール編集
+            </button>
 
             <button
               type="button"
@@ -687,6 +698,7 @@ export default function App() {
         setView("dashboard");
       }}
     />
+    <RuleEditor open={isRuleEditorOpen} onClose={() => setIsRuleEditorOpen(false)} />
     </>
   );
 }
